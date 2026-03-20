@@ -12,6 +12,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.User; // Важно: используем стандартный User
+import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -33,30 +36,44 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String token = jwtTokenProvider.resolveToken(request);
 
-        // Проверяем: 1. Валидность JWT | 2. Есть ли такой токен в базе и АКТИВЕН ли он
+        // 1. Проверяем валидность токена
         if (token != null && jwtTokenProvider.validateToken(token)) {
 
-            // Ищем сессию по Access токену
+            // 2. Проверяем сессию в БД
             Optional<UserSession> session = userSessionRepository.findByAccessToken(token);
 
-            // Если сессия не найдена или её статус не ACTIVE — блокируем доступ
             if (session.isEmpty() || session.get().getStatus() != SessionStatus.ACTIVE) {
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
-                response.getWriter().write("Token has been revoked or used for refresh");
+                response.getWriter().write("Token has been revoked or session is inactive");
                 return;
             }
 
+            // 3. Извлекаем данные из токена
             String username = jwtTokenProvider.getUsername(token);
             Claims claims = jwtTokenProvider.getClaims(token);
-
             List<String> roles = extractRoles(claims);
 
             List<SimpleGrantedAuthority> authorities = roles.stream()
                     .map(role -> new SimpleGrantedAuthority("ROLE_" + role.toUpperCase().replace("ROLE_", "")))
                     .collect(Collectors.toList());
 
-            UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(username, null, authorities);
+            // --- ИСПРАВЛЕНИЕ ТУТ ---
+            // Вместо строки 'username' создаем объект UserDetails.
+            // Это гарантирует, что .getPrincipal() вернет не null и не String, а объект.
+            UserDetails userDetails = new User(username, "", authorities);
+
+            UsernamePasswordAuthenticationToken auth = new UsernamePasswordAuthenticationToken(
+                    userDetails,
+                    null,
+                    authorities
+            );
+
+            // Добавляем детали запроса (IP и т.д.)
+            auth.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+            // Устанавливаем аутентификацию в контекст
             SecurityContextHolder.getContext().setAuthentication(auth);
+            // ------------------------
         }
 
         filterChain.doFilter(request, response);
@@ -66,7 +83,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         Object rolesObj = claims.get("roles");
         List<String> roles = new ArrayList<>();
         if (rolesObj instanceof List<?>) {
-            for (Object o : (List<?>) rolesObj) roles.add(String.valueOf(o));
+            for (Object o : (List<?>) rolesObj) {
+                roles.add(String.valueOf(o));
+            }
         }
         return roles;
     }

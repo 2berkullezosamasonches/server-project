@@ -1,33 +1,23 @@
-HELP.md
+# --- БЕЗОПАСНОСТЬ (Критично) ---
+# Игнорируем только секретные хранилища ключей
+*.jks
+*.p12
+*.key
+
+# --- Сборка Maven ---
 target/
 .mvn/wrapper/maven-wrapper.jar
-!**/src/main/**/target/
-!**/src/test/**/target/
 
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
-
-### IntelliJ IDEA ###
-.idea
+# --- IntelliJ IDEA ---
+.idea/
 *.iws
 *.iml
 *.ipr
+out/
 
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-build/
-!**/src/main/**/build/
-!**/src/test/**/build/
-
-### VS Code ###
+# --- VS Code ---
 .vscode/
+
+# --- Системный мусор ---
+.DS_Store
+Thumbs.db

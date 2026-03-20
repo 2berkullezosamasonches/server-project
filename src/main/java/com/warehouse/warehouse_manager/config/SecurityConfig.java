@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -17,6 +18,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 @Configuration
 @EnableWebSecurity
+@EnableMethodSecurity // Позволяет использовать @PreAuthorize в контроллерах
 public class SecurityConfig {
 
     @Autowired
@@ -35,24 +37,29 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .csrf(csrf -> csrf.disable())
+                .csrf(csrf -> csrf.disable()) // Отключаем CSRF, так как используем JWT
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // Публичные методы
+                        // 1. Публичные эндпоинты (Логин и обновление токена)
                         .requestMatchers("/api/auth/login", "/api/auth/refresh").permitAll()
 
-                        // Регистрация новых пользователей — только Админ
+                        // 2. Управление пользователями (Только ADMIN)
                         .requestMatchers("/api/auth/register").hasRole("ADMIN")
 
-                        // Просмотр данных (Склады, товары) — Юзер и Админ
-                        .requestMatchers(HttpMethod.GET, "/api/**").hasAnyRole("USER", "ADMIN")
+                        // 3. Лицензирование: Создание (Только ADMIN)
+                        .requestMatchers("/api/licenses/create").hasRole("ADMIN")
 
-                        // Любые изменения (POST, PUT, DELETE) — только Админ
+                        // 4. Лицензирование: Активация, Проверка, Продление (Любой авторизованный)
+                        .requestMatchers("/api/licenses/activate", "/api/licenses/check", "/api/licenses/renew").authenticated()
+
+                        // 5. Остальные API (Склады, товары и т.д.)
+                        .requestMatchers(HttpMethod.GET, "/api/**").hasAnyRole("USER", "ADMIN")
                         .requestMatchers("/api/**").hasRole("ADMIN")
 
                         .anyRequest().authenticated()
                 );
 
+        // Добавляем наш JWT фильтр перед стандартным фильтром аутентификации
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
