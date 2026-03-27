@@ -22,7 +22,7 @@ public class KeyProvider {
     private String keyPassword;
 
     public PrivateKey getPrivateKey() throws Exception {
-        KeyStore keystore = KeyStore.getInstance("JKS");
+        KeyStore keystore = KeyStore.getInstance("PKCS12");
         // Загружаем хранилище (оно должно лежать в корне проекта или в resources)
         try (FileInputStream fis = new FileInputStream(keystorePath)) {
             keystore.load(fis, keystorePassword.toCharArray());

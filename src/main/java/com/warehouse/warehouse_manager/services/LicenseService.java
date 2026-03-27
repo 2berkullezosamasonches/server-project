@@ -131,7 +131,7 @@ public class LicenseService {
         // Формируем объект тикета
         Ticket t = Ticket.builder()
                 .currentServerTime(LocalDateTime.now())
-                .ticketLifetimeSeconds(3600L)
+                .ticketLifetimeSeconds(3600)
                 .firstActivationDate(l.getFirstActivationDate())
                 .endingDate(l.getEndingDate())
                 .userId(u.getId())
