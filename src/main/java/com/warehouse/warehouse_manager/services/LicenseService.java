@@ -4,8 +4,8 @@ import com.warehouse.warehouse_manager.dto.Ticket;
 import com.warehouse.warehouse_manager.dto.TicketResponse;
 import com.warehouse.warehouse_manager.model.*;
 import com.warehouse.warehouse_manager.repository.*;
-import com.warehouse.warehouse_manager.security.TicketSigner;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -13,6 +13,7 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class LicenseService {
 
@@ -23,7 +24,9 @@ public class LicenseService {
     private final DeviceRepository deviceRepository;
     private final DeviceLicenseRepository deviceLicenseRepository;
     private final LicenseHistoryRepository licenseHistoryRepository;
-    private final TicketSigner ticketSigner;
+
+    // ВМЕСТО TicketSigner теперь используем наш RSA сервис
+    private final RSASigningService rsaSigningService;
 
     @Transactional
     public License createLicense(Long productId, Long ownerId, Long typeId, Integer deviceCount) {
@@ -46,11 +49,8 @@ public class LicenseService {
 
         if (Boolean.TRUE.equals(license.getBlocked())) throw new RuntimeException("Лицензия заблокирована");
 
-        // Проверка лимита устройств (Пункт 08 вашего плана)
         long currentCount = deviceLicenseRepository.countByLicense(license);
-        System.out.println(">>> [DEBUG] Лицензия: " + code + " | Текущих устройств: " + currentCount + " | Лимит: " + license.getDeviceCount());
 
-        // Если это новое устройство и лимит уже достигнут - выбрасываем 409
         boolean isAlreadyLinked = deviceLicenseRepository.findAll().stream()
                 .anyMatch(dl -> dl.getLicense().getId().equals(license.getId()) && dl.getDevice().getMacAddress().equals(deviceMac));
 
@@ -89,7 +89,6 @@ public class LicenseService {
         if (license.getUser() == null || !license.getUser().getId().equals(user.getId()))
             throw new RuntimeException("Вы не владелец этой лицензии");
 
-        // Пункт 10: Раннее продление (409 Conflict)
         if (license.getEndingDate() != null && license.getEndingDate().isAfter(LocalDateTime.now().plusDays(30))) {
             throw new IllegalStateException("TOO_EARLY_FOR_RENEWAL");
         }
@@ -125,11 +124,28 @@ public class LicenseService {
         return l;
     }
 
+    /**
+     * МОДИФИЦИРОВАННЫЙ МЕТОД ГЕНЕРАЦИИ ОТВЕТА С RSA ПОДПИСЬЮ
+     */
     private TicketResponse generateTicketResponse(License l, Device d, User u) {
+        // Формируем объект тикета
         Ticket t = Ticket.builder()
-                .currentServerTime(LocalDateTime.now()).ticketLifetimeSeconds(3600L)
-                .firstActivationDate(l.getFirstActivationDate()).endingDate(l.getEndingDate())
-                .userId(u.getId()).deviceId(d != null ? d.getId() : null).blocked(l.getBlocked()).build();
-        return new TicketResponse(t, ticketSigner.sign(t));
+                .currentServerTime(LocalDateTime.now())
+                .ticketLifetimeSeconds(3600L)
+                .firstActivationDate(l.getFirstActivationDate())
+                .endingDate(l.getEndingDate())
+                .userId(u.getId())
+                .deviceId(d != null ? d.getId() : null)
+                .blocked(l.getBlocked())
+                .build();
+
+        try {
+            // Вызываем наш новый RSA сервис вместо старого Signer
+            String signature = rsaSigningService.signTicket(t);
+            return new TicketResponse(t, signature);
+        } catch (Exception e) {
+            log.error("RSA Signing failed!", e);
+            throw new RuntimeException("Ошибка при формировании цифровой подписи");
+        }
     }
 }
