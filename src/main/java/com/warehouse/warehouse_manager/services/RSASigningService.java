@@ -3,6 +3,7 @@ package com.warehouse.warehouse_manager.services;
 import com.warehouse.warehouse_manager.dto.Ticket;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
 import java.security.PrivateKey;
 import java.security.Signature;
 import java.util.Base64;
@@ -11,22 +12,23 @@ import java.util.Base64;
 @RequiredArgsConstructor
 public class RSASigningService {
 
+    private static final String SIGNATURE_ALGORITHM = "SHA256withRSA";
+
     private final KeyProvider keyProvider;
     private final CanonicalizationService canonicalizationService;
 
-    public String signTicket(Ticket ticket) throws Exception {
-        // 1. Получаем каноничные байты
-        byte[] data = canonicalizationService.canonicalize(ticket);
+    public String signTicket(Ticket ticket) {
+        try {
+            byte[] data = canonicalizationService.canonicalize(ticket);
+            PrivateKey privateKey = keyProvider.getPrivateKey();
 
-        // 2. Достаем ключ
-        PrivateKey privateKey = keyProvider.getPrivateKey();
+            Signature signature = Signature.getInstance(SIGNATURE_ALGORITHM);
+            signature.initSign(privateKey);
+            signature.update(data);
 
-        // 3. Подписываем (SHA256withRSA)
-        Signature rsa = Signature.getInstance("SHA256withRSA");
-        rsa.initSign(privateKey);
-        rsa.update(data);
-
-        // 4. Кодируем результат в Base64
-        return Base64.getEncoder().encodeToString(rsa.sign());
+            return Base64.getEncoder().encodeToString(signature.sign());
+        } catch (Exception e) {
+            throw new IllegalStateException("Ошибка формирования ЭЦП тикета: " + e.getMessage(), e);
+        }
     }
 }
