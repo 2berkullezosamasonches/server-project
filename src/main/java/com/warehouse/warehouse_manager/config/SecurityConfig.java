@@ -18,7 +18,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 @Configuration
 @EnableWebSecurity
-@EnableMethodSecurity // Позволяет использовать @PreAuthorize в контроллерах
+@EnableMethodSecurity
 public class SecurityConfig {
 
     @Autowired
@@ -37,29 +37,32 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .csrf(csrf -> csrf.disable()) // Отключаем CSRF, так как используем JWT
+                .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        // 1. Публичные эндпоинты (Логин и обновление токена)
+                        // Публичные эндпоинты
                         .requestMatchers("/api/auth/login", "/api/auth/refresh").permitAll()
 
-                        // 2. Управление пользователями (Только ADMIN)
+                        // Управление пользователями
                         .requestMatchers("/api/auth/register").hasRole("ADMIN")
 
-                        // 3. Лицензирование: Создание (Только ADMIN)
+                        // Лицензии
                         .requestMatchers("/api/licenses/create").hasRole("ADMIN")
-
-                        // 4. Лицензирование: Активация, Проверка, Продление (Любой авторизованный)
                         .requestMatchers("/api/licenses/activate", "/api/licenses/check", "/api/licenses/renew").authenticated()
 
-                        // 5. Остальные API (Склады, товары и т.д.)
+                        // Сигнатуры: чтение доступно USER и ADMIN
+                        .requestMatchers(HttpMethod.GET, "/api/signatures/**").hasAnyRole("USER", "ADMIN")
+                        .requestMatchers(HttpMethod.POST, "/api/signatures/by-ids").hasAnyRole("USER", "ADMIN")
+
+                        // Прочие GET API
                         .requestMatchers(HttpMethod.GET, "/api/**").hasAnyRole("USER", "ADMIN")
+
+                        // Все остальные API-запросы только для ADMIN
                         .requestMatchers("/api/**").hasRole("ADMIN")
 
                         .anyRequest().authenticated()
                 );
 
-        // Добавляем наш JWT фильтр перед стандартным фильтром аутентификации
         http.addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

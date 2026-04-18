@@ -1,5 +1,6 @@
 package com.warehouse.warehouse_manager.services;
 
+import com.warehouse.warehouse_manager.dto.SignaturePayload;
 import com.warehouse.warehouse_manager.dto.Ticket;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -18,8 +19,16 @@ public class RSASigningService {
     private final CanonicalizationService canonicalizationService;
 
     public String signTicket(Ticket ticket) {
+        return signObject(ticket, "Ошибка формирования ЭЦП тикета");
+    }
+
+    public String signSignaturePayload(SignaturePayload payload) {
+        return signObject(payload, "Ошибка формирования ЭЦП сигнатуры");
+    }
+
+    private String signObject(Object payload, String errorMessage) {
         try {
-            byte[] data = canonicalizationService.canonicalize(ticket);
+            byte[] data = canonicalizationService.canonicalize(payload);
             PrivateKey privateKey = keyProvider.getPrivateKey();
 
             Signature signature = Signature.getInstance(SIGNATURE_ALGORITHM);
@@ -28,7 +37,7 @@ public class RSASigningService {
 
             return Base64.getEncoder().encodeToString(signature.sign());
         } catch (Exception e) {
-            throw new IllegalStateException("Ошибка формирования ЭЦП тикета: " + e.getMessage(), e);
+            throw new IllegalStateException(errorMessage + ": " + e.getMessage(), e);
         }
     }
 }
