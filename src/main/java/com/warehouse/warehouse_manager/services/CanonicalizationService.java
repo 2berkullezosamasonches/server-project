@@ -1,120 +1,218 @@
 package com.warehouse.warehouse_manager.services;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.MapperFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.List;
 
 @Service
 public class CanonicalizationService {
 
+    private static final BigInteger MIN_SAFE_INTEGER = BigInteger.valueOf(-9_007_199_254_740_991L);
+    private static final BigInteger MAX_SAFE_INTEGER = BigInteger.valueOf(9_007_199_254_740_991L);
+
     private final ObjectMapper objectMapper;
 
-    public CanonicalizationService() {
-        this.objectMapper = new ObjectMapper();
-        this.objectMapper.registerModule(new JavaTimeModule());
-        this.objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-        this.objectMapper.disable(SerializationFeature.INDENT_OUTPUT);
-        this.objectMapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
-        this.objectMapper.enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY);
-        this.objectMapper.enable(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+    public CanonicalizationService(ObjectMapper objectMapper) {
+        this.objectMapper = objectMapper;
     }
 
     public byte[] canonicalize(Object payload) {
-        try {
-            JsonNode root = objectMapper.valueToTree(payload);
-            String canonicalJson = canonicalizeNode(root);
-            return canonicalJson.getBytes(StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            throw new IllegalStateException("Ошибка канонизации payload", e);
-        }
+        String canonicalJson = canonicalizeToString(payload);
+        return canonicalJson.getBytes(StandardCharsets.UTF_8);
     }
 
     public String canonicalizeToString(Object payload) {
-        return new String(canonicalize(payload), StandardCharsets.UTF_8);
+        JsonNode node = toJsonNode(payload);
+        StringBuilder canonical = new StringBuilder();
+        writeCanonicalJson(node, canonical);
+        return canonical.toString();
     }
 
-    private String canonicalizeNode(JsonNode node) throws JsonProcessingException {
+    private JsonNode toJsonNode(Object payload) {
+        try {
+            if (payload instanceof String json) {
+                return objectMapper.reader()
+                        .with(JsonParser.Feature.STRICT_DUPLICATE_DETECTION)
+                        .readTree(json);
+            }
+            return objectMapper.valueToTree(payload);
+        } catch (Exception ex) {
+            throw new IllegalStateException("Ошибка преобразования payload в JSON", ex);
+        }
+    }
+
+    private void writeCanonicalJson(JsonNode node, StringBuilder out) {
         if (node == null || node.isNull()) {
-            return "null";
+            out.append("null");
+            return;
         }
 
         if (node.isObject()) {
-            List<String> fieldNames = new ArrayList<>();
-            Iterator<String> it = node.fieldNames();
-            while (it.hasNext()) {
-                fieldNames.add(it.next());
-            }
-            fieldNames.sort(String::compareTo);
-
-            StringBuilder sb = new StringBuilder("{");
-            for (int i = 0; i < fieldNames.size(); i++) {
-                String name = fieldNames.get(i);
-                if (i > 0) {
-                    sb.append(",");
-                }
-                sb.append(objectMapper.writeValueAsString(name))
-                        .append(":")
-                        .append(canonicalizeNode(node.get(name)));
-            }
-            sb.append("}");
-            return sb.toString();
+            writeCanonicalObject((ObjectNode) node, out);
+            return;
         }
 
         if (node.isArray()) {
-            StringBuilder sb = new StringBuilder("[");
+            out.append('[');
             for (int i = 0; i < node.size(); i++) {
                 if (i > 0) {
-                    sb.append(",");
+                    out.append(',');
                 }
-                sb.append(canonicalizeNode(node.get(i)));
+                writeCanonicalJson(node.get(i), out);
             }
-            sb.append("]");
-            return sb.toString();
+            out.append(']');
+            return;
         }
 
         if (node.isTextual()) {
-            return objectMapper.writeValueAsString(node.textValue());
+            writeCanonicalString(node.textValue(), out);
+            return;
         }
 
         if (node.isBoolean()) {
-            return String.valueOf(node.booleanValue());
+            out.append(node.booleanValue());
+            return;
         }
 
         if (node.isNumber()) {
-            return normalizeNumber(node.asText());
+            out.append(writeCanonicalNumber(node));
+            return;
         }
 
-        return objectMapper.writeValueAsString(node);
+        throw new IllegalStateException("Неподдерживаемый тип JSON-узла: " + node.getNodeType());
     }
 
-    private String normalizeNumber(String raw) {
-        BigDecimal bd = new BigDecimal(raw).stripTrailingZeros();
+    private void writeCanonicalObject(ObjectNode node, StringBuilder out) {
+        List<String> fields = new ArrayList<>();
+        node.fieldNames().forEachRemaining(fields::add);
+        fields.sort(String::compareTo);
 
-        if (bd.compareTo(BigDecimal.ZERO) == 0) {
+        out.append('{');
+        for (int i = 0; i < fields.size(); i++) {
+            if (i > 0) {
+                out.append(',');
+            }
+
+            String field = fields.get(i);
+            writeCanonicalString(field, out);
+            out.append(':');
+            writeCanonicalJson(node.get(field), out);
+        }
+        out.append('}');
+    }
+
+    private void writeCanonicalString(String value, StringBuilder out) {
+        validateNoLoneSurrogates(value);
+
+        out.append('"');
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+            switch (ch) {
+                case '"' -> out.append("\\\"");
+                case '\\' -> out.append("\\\\");
+                case '\b' -> out.append("\\b");
+                case '\f' -> out.append("\\f");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                case '\t' -> out.append("\\t");
+                default -> {
+                    if (ch <= 0x1F) {
+                        out.append("\\u");
+                        String hex = Integer.toHexString(ch);
+                        out.append("0".repeat(4 - hex.length()));
+                        out.append(hex);
+                    } else {
+                        out.append(ch);
+                    }
+                }
+            }
+        }
+        out.append('"');
+    }
+
+    private void validateNoLoneSurrogates(String value) {
+        if (value == null) {
+            return;
+        }
+
+        for (int i = 0; i < value.length(); i++) {
+            char ch = value.charAt(i);
+
+            if (Character.isHighSurrogate(ch)) {
+                if (i + 1 >= value.length() || !Character.isLowSurrogate(value.charAt(i + 1))) {
+                    throw new IllegalStateException("Одиночный surrogate недопустим в канонизации");
+                }
+                i++;
+                continue;
+            }
+
+            if (Character.isLowSurrogate(ch)) {
+                throw new IllegalStateException("Одиночный surrogate недопустим в канонизации");
+            }
+        }
+    }
+
+    private String writeCanonicalNumber(JsonNode node) {
+        validateIJsonNumber(node);
+
+        double value = node.doubleValue();
+        if (!Double.isFinite(value)) {
+            throw new IllegalStateException("Недопустимое JSON-число: NaN или Infinity");
+        }
+
+        if (value == 0d) {
             return "0";
         }
 
-        String plain = bd.toPlainString();
+        BigDecimal decimal = BigDecimal.valueOf(value).stripTrailingZeros();
+        int exponent = decimal.precision() - decimal.scale() - 1;
 
-        if (plain.matches("-?\\d{21,}")) {
-            return bd.toString().replace("E", "e");
+        if (exponent < -6 || exponent >= 21) {
+            String digits = decimal.unscaledValue().abs().toString();
+            String sign = decimal.signum() < 0 ? "-" : "";
+            String exponentValue = exponent >= 0 ? "+" + exponent : Integer.toString(exponent);
+
+            if (digits.length() == 1) {
+                return sign + digits + "e" + exponentValue;
+            }
+
+            return sign + digits.charAt(0) + "." + digits.substring(1) + "e" + exponentValue;
         }
 
-        if (plain.matches("-?0\\.0{6,}\\d+")) {
-            return bd.toString().replace("E", "e");
+        String plain = decimal.toPlainString();
+
+        if (plain.contains(".")) {
+            int end = plain.length();
+            while (end > 0 && plain.charAt(end - 1) == '0') {
+                end--;
+            }
+            if (end > 0 && plain.charAt(end - 1) == '.') {
+                end--;
+            }
+            return plain.substring(0, end);
         }
 
         return plain;
+    }
+
+    private void validateIJsonNumber(JsonNode node) {
+        if (!node.isIntegralNumber()) {
+            return;
+        }
+
+        BigInteger value = node.bigIntegerValue();
+        if (value.compareTo(MIN_SAFE_INTEGER) < 0 || value.compareTo(MAX_SAFE_INTEGER) > 0) {
+            throw new IllegalStateException(
+                    "Целое число выходит за безопасный диапазон I-JSON: " + value
+            );
+        }
     }
 }
