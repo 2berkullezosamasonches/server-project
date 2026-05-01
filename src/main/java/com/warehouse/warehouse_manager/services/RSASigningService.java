@@ -26,6 +26,20 @@ public class RSASigningService {
         return signObject(payload, "Ошибка формирования ЭЦП сигнатуры");
     }
 
+    public byte[] signBytes(byte[] data) {
+        try {
+            PrivateKey privateKey = keyProvider.getPrivateKey();
+
+            Signature signature = Signature.getInstance(SIGNATURE_ALGORITHM);
+            signature.initSign(privateKey);
+            signature.update(data);
+
+            return signature.sign();
+        } catch (Exception e) {
+            throw new IllegalStateException("Ошибка формирования ЭЦП бинарного манифеста: " + e.getMessage(), e);
+        }
+    }
+
     private String signObject(Object payload, String errorMessage) {
         try {
             byte[] data = canonicalizationService.canonicalize(payload);
