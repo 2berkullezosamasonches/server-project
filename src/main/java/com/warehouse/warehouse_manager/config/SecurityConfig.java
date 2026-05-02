@@ -40,8 +40,12 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+
                         // Публичные эндпоинты
                         .requestMatchers("/api/auth/login", "/api/auth/refresh").permitAll()
+
+                        // 👇 ВОТ ЭТО МЫ ДОБАВИЛИ
+                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
 
                         // Управление пользователями
                         .requestMatchers("/api/auth/register").hasRole("ADMIN")
@@ -50,14 +54,14 @@ public class SecurityConfig {
                         .requestMatchers("/api/licenses/create").hasRole("ADMIN")
                         .requestMatchers("/api/licenses/activate", "/api/licenses/check", "/api/licenses/renew").authenticated()
 
-                        // Сигнатуры: чтение доступно USER и ADMIN
+                        // Сигнатуры
                         .requestMatchers(HttpMethod.GET, "/api/signatures/**").hasAnyRole("USER", "ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/signatures/by-ids").hasAnyRole("USER", "ADMIN")
 
                         // Прочие GET API
                         .requestMatchers(HttpMethod.GET, "/api/**").hasAnyRole("USER", "ADMIN")
 
-                        // Все остальные API-запросы только для ADMIN
+                        // Всё остальное
                         .requestMatchers("/api/**").hasRole("ADMIN")
 
                         .anyRequest().authenticated()
