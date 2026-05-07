@@ -13,6 +13,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
     volumes:
       - minio_data:/data
+    restart: unless-stopped
 
   minio-init:
     image: minio/mc:latest
@@ -21,12 +22,12 @@ services:
       - minio
     entrypoint: >
       /bin/sh -c "
-      sleep 5;
-      mc alias set local ${MINIO_ENDPOINT} ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
-      mc mb -p local/${MINIO_BUCKET};
-      mc anonymous set none local/${MINIO_BUCKET};
-      mc admin user add local ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY};
-      mc admin policy attach local readwrite --user ${MINIO_ACCESS_KEY};
+      sleep 10;
+      mc alias set local http://minio:9000 ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD};
+      mc mb -p local/${MINIO_BUCKET} || true;
+      mc anonymous set none local/${MINIO_BUCKET} || true;
+      mc admin user add local ${MINIO_ACCESS_KEY} ${MINIO_SECRET_KEY} || true;
+      mc admin policy attach local readwrite --user ${MINIO_ACCESS_KEY} || true;
       exit 0;
       "
 
